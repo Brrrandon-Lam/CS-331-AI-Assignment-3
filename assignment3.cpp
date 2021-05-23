@@ -8,10 +8,23 @@
 //Compile with with: g++ -std=gnu++11 assignment3.cpp
 //Run with ./a.out testSet.txt trainingSet.txt preprocessed_test.txt preprocessed_train.txt
 
+/* Helper Function Sources*/
+/*
+* - C Standard Library
+*  https://www.cplusplus.com/reference/fstream/
+*  https://www.cplusplus.com/reference/iostream/
+*  https://www.cplusplus.com/reference/sstream/
+*  https://www.cplusplus.com/reference/vector/
+*  https://www.cplusplus.com/reference/algorithm/
+*  https://www.cplusplus.com/reference/string/
+*/
+
 struct Word {
 	std::string word = "";
 	int positiveClassLabel;
 	int negativeClassLabel;
+	int probabilityNegative;
+	int probabilityPositive;
 };
 
 //Function declarations
@@ -22,6 +35,8 @@ void removeDupes(std::vector<Word>& uniqueVocabulary);
 void output_features(std::ofstream& trainingFOUT, std::vector<Word>& vocabulary, std::vector<std::string>& featurized, std::vector<Word> &uniqueVocabulary, int& numLines);
 void validateOpenOfstream(std::ofstream& ofstreamVariable);
 void validateOpenIfstream(std::ifstream& ifstreamVariable);
+void dirichletPrior(std::vector<Word>& vocabulary);
+void reset(std::ifstream& trainingFIN);
 
 int main() {
 	//create two ifstream objects to read from the test and training set text files.
@@ -37,14 +52,41 @@ int main() {
 	//preprocessing will return a vector of Words (a struct) to the vector<Word> vocabulary.
 	int numLines = 0;
 	vocabulary = preprocessing(trainingFIN, trainingFOUT, numLines); //pass the training set read and write to the preprocessing function.
+	dirichletPrior(vocabulary);
+	//debugging
+	for (int i = 0; i < vocabulary.size(); i++) {
+		std::cout << vocabulary[i].word << std::endl;
+		std::cout << "Probability Negative: " << vocabulary[i].probabilityNegative << " Probability Positive: " << vocabulary[i].probabilityPositive << std::endl;
+	}
+	reset(trainingFIN);
+	
+}
 
-	//preprocessing will process the training set and output it.
-		//strip the punctuation
-		//great == Great == GREAT, use tolower().
-		//special characters aren't critical to the performance of the classifier
-		//we can get rid of integers easily, but to get rid of special charactesr we'd need an array of legal characters
-		//[a, b, c, d, e......, z]
-		//rearrange into alphabetical order.
+
+/**********************************************
+* Function: sortVocabulary
+* Description: Simple function that reset the eof flag bit and returns it to the beginning, just to clean up the main() function.
+* Parameter: stream variables
+**********************************************/
+
+void reset(std::ifstream& trainingFIN) {
+	trainingFIN.clear(); //ios::clear resets the flags of the ifstream variable. Particularly, we read to the end of file and set the eof flag to true.
+	//running clear will set the eof flag to false again
+	trainingFIN.seekg(0, std::ios::beg); //in this case, we want the end trainingFIN (file input stream) to be set to the beginning using seekg().
+} 
+	
+void dirichletPrior(std::vector<Word>& vocabulary) {
+	//dirichlet priors formula
+	//total number of records 
+	//each value that doesnt exist is equally likely int he absence of data.  This 1/Nj value is dominated by values that do have existing probabilities.
+	for (int i = 0; i < vocabulary.size(); i++) {
+		int denominator = ((vocabulary[i].positiveClassLabel + vocabulary[i].negativeClassLabel) + 2);
+		//in the denominator, 2 is the number of values that the probability can take on. (positive or negative)
+
+		//For each word in the vocabulary, calculate the probability that a word came from the positive or the negative by adding its class label values.
+		vocabulary[i].probabilityNegative = (vocabulary[i].negativeClassLabel + 1) / denominator;
+		vocabulary[i].probabilityPositive = (vocabulary[i].positiveClassLabel + 1) / denominator;
+	}
 }
 
 /**********************************************
@@ -105,6 +147,14 @@ void validateOpenOfstream(std::ofstream& ofstreamVariable) {
 	}
 }
 
+/**********************************************
+* Function: preprocessing
+* Description: outer layer function for preprocessing, makes calls to a bunch of functions that do stuff
+*			   at the end, this function will print the contents of the vector to the preprocessing_training.txt
+*			   and return the vocabulary to the main function.
+* Param: ofstream, ifstream, numLines.
+**********************************************/
+
 std::vector<Word> preprocessing(std::ifstream &trainingFIN, std::ofstream &trainingFOUT, int &numLines) {
 	validateOpenIfstream(trainingFIN); //if the file is open then we will remove punctuation and convert stuff to lower.
 	std::vector<Word> vocabulary; //stores vocabulary
@@ -116,6 +166,7 @@ std::vector<Word> preprocessing(std::ifstream &trainingFIN, std::ofstream &train
 	sort(uniqueVocabulary.begin(), uniqueVocabulary.end(), sortVocabulary);
 	validateOpenOfstream(trainingFOUT);
 
+	/*************************************** OUTPUT TO FILE **********************************************/
 
 	for (int i = 0; i < numLines + 1; i++) {
 		if (i == 0) { //if the line number is 0, then we want to print all of the words int he vocabulary alphabetized on a single line.
@@ -184,16 +235,22 @@ void make_unique(std::vector<Word>& vocabulary, std::vector<std::string>& featur
 		finalWord.positiveClassLabel = positiveLabelValue; //assign positive and negative label values.
 		uniqueVocabulary.push_back(finalWord); //push onto the unique vocabulary set (not unique yet)
 
-		removeDupes(uniqueVocabulary);
+		removeDupes(uniqueVocabulary); //call to remove duplicates from the unique list.
 	}
 }
 
+/**********************************************
+* Function: push_to_vector
+* Description: Reads the input file and creates a cleaned up vector containing Words and a vector of strings to contain each sentence from the text file.
+* Param: ifstream variable, numLines, two vectors: one of type Word and one of type string.
+**********************************************/
+
 void push_to_vector(std::ifstream& trainingFIN, int& numLines, std::vector<Word>& vocabulary, std::vector<std::string>& featurized) {
-	std::string currentLine;
-	Word currentWord;
-	std::string currentSentence = "";
-	std::string currentText = "";
-	char spacer = ' ';
+	std::string currentLine; //a string used in getline.
+	Word currentWord; //for storing the current Word and its additional parameters, particularly whether its positive or negative at this point in time.
+	std::string currentSentence = ""; //for storing the current sentence
+	std::string currentText = ""; //for storing the current word
+	char spacer = ' '; //character just for seeing if there are spaces later on
 	
 	while (!trainingFIN.eof()) {
 
